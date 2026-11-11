@@ -2,17 +2,17 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import joblib
-import os
 import re
 import random
+import joblib
+import tensorflow as tf
 
 from gensim.models import Word2Vec
 from tensorflow.keras.models import load_model
 
 
 # ==========================================
-# 1. PAGE CONFIGURATION
+# PAGE CONFIGURATION
 # ==========================================
 
 st.set_page_config(
@@ -21,66 +21,29 @@ st.set_page_config(
     layout="wide"
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 # ==========================================
-# 2. CUSTOM CSS
+# CUSTOM CSS
 # ==========================================
 
 st.markdown("""
 <style>
 
-/* Main Background */
-
 .stApp {
-    background:
-        radial-gradient(
-            ellipse at 10% 10%,
-            #421078 0%,
-            transparent 35%
-        ),
-        radial-gradient(
-            ellipse at 90% 90%,
-            #30105e 0%,
-            transparent 35%
-        ),
-        linear-gradient(
-            135deg,
-            #080d2b,
-            #101b48,
-            #090d2b
-        );
-
-    background-attachment: fixed;
+    background: linear-gradient(135deg, #0f172a, #1e1b4b, #312e81);
     color: white;
 }
 
-/* Main Container */
-
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-    max-width: 95%;
-}
-
-/* Headings */
-
-h1, h2, h3 {
+h1, h2, h3, p, label {
     color: white !important;
 }
 
-/* Main Title */
-
 .main-title {
     text-align: center;
-    font-size: 42px;
+    font-size: 38px;
     font-weight: bold;
-    color: white;
-}
-
-.main-title span {
-    color: #22d3ee;
+    color: #67e8f9;
+    margin-bottom: 10px;
 }
 
 .subtitle {
@@ -90,82 +53,29 @@ h1, h2, h3 {
     margin-bottom: 30px;
 }
 
-/* Text Area */
-
 .stTextArea textarea {
-    background: rgba(17, 29, 65, 0.95) !important;
+    background-color: #172554 !important;
     color: white !important;
-    border: 2px solid #22d3ee !important;
-    border-radius: 12px !important;
+    border: 1px solid #06b6d4 !important;
+    border-radius: 12px;
 }
 
-.stTextArea textarea::placeholder {
-    color: #cbd5e1 !important;
+.stSelectbox div[data-baseweb="select"] {
+    background-color: #172554;
+    color: white;
 }
 
-/* Select Box */
-
-.stSelectbox div[data-baseweb="select"] > div {
-    background: #15234d !important;
-    color: white !important;
-    border: 1px solid #22d3ee !important;
+.stButton button {
+    background: linear-gradient(90deg, #0891b2, #7c3aed);
+    color: white;
+    border: none;
     border-radius: 10px;
+    font-weight: bold;
+    width: 100%;
 }
-
-/* Buttons */
-
-.stButton > button,
-.stDownloadButton > button {
-    background: linear-gradient(
-        90deg,
-        #06b6d4,
-        #9333ea
-    ) !important;
-
-    color: white !important;
-    border: none !important;
-    border-radius: 12px !important;
-    font-weight: bold !important;
-    min-height: 42px;
-}
-
-.stButton > button:hover,
-.stDownloadButton > button:hover {
-    box-shadow: 0 0 15px #9333ea;
-    transform: translateY(-2px);
-}
-
-/* Prediction Metric Cards */
-
-[data-testid="stMetric"] {
-    background: linear-gradient(
-        135deg,
-        rgba(20, 40, 85, 0.95),
-        rgba(65, 25, 105, 0.85)
-    ) !important;
-
-    border: 1px solid #22d3ee !important;
-    border-radius: 15px !important;
-    padding: 22px !important;
-}
-
-[data-testid="stMetricLabel"] {
-    color: #cbd5e1 !important;
-}
-
-[data-testid="stMetricValue"] {
-    color: #22d3ee !important;
-}
-
-/* POSITIVE MESSAGE */
 
 .positive-message {
-    background: linear-gradient(
-        90deg,
-        #047857,
-        #0891b2
-    );
-
+    background: linear-gradient(90deg, #047857, #0891b2);
     color: white !important;
     border: 1px solid #5eead4;
     border-radius: 12px;
@@ -175,15 +85,8 @@ h1, h2, h3 {
     margin: 15px 0;
 }
 
-/* NEGATIVE MESSAGE */
-
 .negative-message {
-    background: linear-gradient(
-        90deg,
-        #be123c,
-        #ea580c
-    );
-
+    background: linear-gradient(90deg, #be123c, #ea580c);
     color: white !important;
     border: 1px solid #fda4af;
     border-radius: 12px;
@@ -193,29 +96,18 @@ h1, h2, h3 {
     margin: 15px 0;
 }
 
-/* Progress Bar */
-
-.stProgress > div > div > div > div {
-    background: linear-gradient(
-        90deg,
-        #06b6d4,
-        #9333ea
-    );
+.metric-card {
+    background: #172554;
+    border: 1px solid #06b6d4;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
 }
-
-/* Dataframe */
-
-[data-testid="stDataFrame"] {
-    border: 1px solid #22d3ee;
-    border-radius: 10px;
-}
-
-/* Footer */
 
 .footer {
     text-align: center;
-    color: #cbd5e1;
-    padding: 25px;
+    color: #94a3b8;
+    margin-top: 40px;
 }
 
 </style>
@@ -223,52 +115,70 @@ h1, h2, h3 {
 
 
 # ==========================================
-# 3. LOAD MODEL FILES
+# TITLE
+# ==========================================
+
+st.markdown(
+    '<div class="main-title">🎬 Movie Sentiment Analyzer</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">Analyze movie reviews using Word2Vec and Artificial Neural Networks</div>',
+    unsafe_allow_html=True
+)
+
+
+# ==========================================
+# LOAD MODEL AND ARTIFACTS
 # ==========================================
 
 @st.cache_resource
 def load_artifacts():
 
-    model = load_model(
-        os.path.join(BASE_DIR, "word2vec_ann.keras")
+    # Display versions in logs if needed
+    print("TensorFlow version:", tf.__version__)
+    print("Keras version:", tf.keras.__version__)
+
+    # Load ANN model
+    ann_model = load_model(
+        "word2vec_ann.keras",
+        compile=False
     )
 
-    word2vec_model = Word2Vec.load(
-        os.path.join(BASE_DIR, "word2vec.model")
-    )
+    # Load Word2Vec model
+    w2v_model = Word2Vec.load("word2vec.model")
 
-    label_encoder = joblib.load(
-        os.path.join(BASE_DIR, "label_encoder.pkl")
-    )
+    # Load Label Encoder
+    label_encoder = joblib.load("label_encoder.pkl")
 
-    stop_words = joblib.load(
-        os.path.join(BASE_DIR, "stop_words.pkl")
-    )
+    # Load stopwords
+    stop_words = joblib.load("stop_words.pkl")
 
-    return model, word2vec_model, label_encoder, stop_words
+    return ann_model, w2v_model, label_encoder, stop_words
 
 
 try:
+    model, word2vec_model, label_encoder, stop_words = load_artifacts()
 
-    model, word2vec_model, label_encoder, stop_words = (
-        load_artifacts()
-    )
+    st.success("✅ All models and files loaded successfully!")
 
 except Exception as e:
 
     st.error(f"Model loading error: {e}")
+
     st.stop()
 
 
 # ==========================================
-# 4. TEXT PREPROCESSING
+# TEXT CLEANING
 # ==========================================
 
 def clean_text(text):
 
     text = text.lower()
 
-    text = re.sub(r"<.*?>", "", text)
+    text = re.sub(r"<.*?>", " ", text)
 
     text = re.sub(r"[^a-zA-Z\s]", " ", text)
 
@@ -277,141 +187,130 @@ def clean_text(text):
     return text
 
 
-def preprocess_text(text):
+# ==========================================
+# TOKENIZATION
+# ==========================================
 
-    text = clean_text(text)
+def tokenize_text(text):
 
-    tokens = text.split()
+    cleaned_text = clean_text(text)
+
+    tokens = cleaned_text.split()
+
+    # Preserve negation words
+    negation_words = {
+        "no", "not", "nor", "never", "neither",
+        "none", "cannot", "without"
+    }
 
     tokens = [
         word for word in tokens
-        if word not in stop_words
+        if word not in stop_words or word in negation_words
     ]
 
     return tokens
 
 
 # ==========================================
-# 5. WORD2VEC SENTENCE VECTOR
+# WORD2VEC SENTENCE EMBEDDING
 # ==========================================
 
-def get_sentence_vector(tokens):
+def get_sentence_embedding(text):
 
-    vectors = [
-        word2vec_model.wv[word]
-        for word in tokens
-        if word in word2vec_model.wv
-    ]
+    tokens = tokenize_text(text)
+
+    vectors = []
+
+    for word in tokens:
+
+        if word in word2vec_model.wv:
+
+            vectors.append(word2vec_model.wv[word])
 
     if len(vectors) == 0:
 
-        return np.zeros(
-            word2vec_model.vector_size
-        )
+        return np.zeros(100, dtype=np.float32)
 
-    return np.mean(vectors, axis=0)
+    embedding = np.mean(vectors, axis=0)
+
+    return embedding.astype(np.float32)
 
 
 # ==========================================
-# 6. SENTIMENT PREDICTION
+# SENTIMENT PREDICTION
 # ==========================================
 
 def predict_sentiment(review):
 
-    tokens = preprocess_text(review)
+    embedding = get_sentence_embedding(review)
 
-    sentence_vector = get_sentence_vector(tokens)
+    embedding = embedding.reshape(1, -1)
 
-    input_data = np.array(
-        [sentence_vector],
-        dtype=np.float32
+    prediction = model.predict(
+        embedding,
+        verbose=0
     )
 
-    probability = float(
-        model.predict(input_data, verbose=0)[0][0]
+    probability = float(np.asarray(prediction).reshape(-1)[0])
+
+    # ANN sigmoid predicts probability for class index 1
+    predicted_class_index = 1 if probability >= 0.5 else 0
+
+    sentiment = str(
+        label_encoder.inverse_transform(
+            [predicted_class_index]
+        )[0]
     )
 
-    # Sigmoid probability for class index 1
-
-    predicted_index = int(probability >= 0.5)
-
-    predicted_sentiment = label_encoder.inverse_transform(
-        [predicted_index]
-    )[0]
-
-    classes = [
-        str(c).lower()
-        for c in label_encoder.classes_
-    ]
-
-    positive_index = next(
-        (
-            i for i, c in enumerate(classes)
-            if "positive" in c
-        ),
-        1
+    confidence = (
+        probability if predicted_class_index == 1
+        else 1 - probability
     )
 
-    # Positive probability
-
-    if positive_index == 1:
-
-        positive_probability = probability * 100
-
-    else:
-
-        positive_probability = (1 - probability) * 100
-
-    negative_probability = 100 - positive_probability
-
-    confidence = max(
-        positive_probability,
-        negative_probability
-    )
-
-    return (
-        str(predicted_sentiment).upper(),
-        confidence,
-        positive_probability,
-        negative_probability
-    )
+    return sentiment.upper(), confidence, probability
 
 
 # ==========================================
-# 7. SAMPLE REVIEWS
+# SAMPLE REVIEWS
 # ==========================================
 
-positive_reviews = [
-    "This movie is amazing. I love the story and acting!",
-    "Excellent movie with wonderful performances.",
-    "I really enjoyed this film. It was fantastic!",
-    "The movie was emotional and beautiful.",
-    "Great direction, amazing music, and brilliant acting."
-]
+sample_reviews = {
 
-negative_reviews = [
-    "This movie is very bad. I hate it!",
-    "Worst movie ever. Very boring and disappointing!",
-    "I did not enjoy this film. The acting was terrible.",
-    "The story was boring and completely disappointing.",
-    "I wasted my time watching this movie."
-]
+    "Positive Review":
+    "This movie is absolutely fantastic. The acting is brilliant, "
+    "the story is interesting and the direction is excellent. "
+    "I really enjoyed watching this movie.",
 
-all_reviews = positive_reviews + negative_reviews
+    "Negative Review":
+    "This movie is very boring and disappointing. "
+    "The story is weak, the acting is terrible and "
+    "I did not enjoy watching it at all."
+}
 
 
 # ==========================================
-# 8. SESSION STATE
+# SESSION STATE
 # ==========================================
-
-if "history" not in st.session_state:
-    st.session_state.history = []
 
 if "movie_review" not in st.session_state:
     st.session_state.movie_review = ""
 
-if "sample_option" not in st.session_state:
-    st.session_state.sample_option = "Select a sample review"
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+
+def load_sample():
+
+    selected = st.session_state.sample_option
+
+    st.session_state.movie_review = sample_reviews[selected]
+
+
+def random_review():
+
+    st.session_state.movie_review = random.choice(
+        list(sample_reviews.values())
+    )
 
 
 def clear_review():
@@ -419,88 +318,46 @@ def clear_review():
     st.session_state.movie_review = ""
 
 
-def set_random_review():
+# ==========================================
+# SAMPLE REVIEW SELECTION
+# ==========================================
 
-    st.session_state.movie_review = random.choice(
-        all_reviews
+st.subheader("📝 Enter Movie Review")
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+
+    st.selectbox(
+        "Choose Sample Review",
+        list(sample_reviews.keys()),
+        key="sample_option"
+    )
+
+with col2:
+
+    st.write("")
+
+    st.button(
+        "Load Sample Review",
+        on_click=load_sample
     )
 
 
-def load_sample_review():
-
-    selected = st.session_state.sample_option
-
-    if selected == "Positive Review":
-
-        st.session_state.movie_review = random.choice(
-            positive_reviews
-        )
-
-    elif selected == "Negative Review":
-
-        st.session_state.movie_review = random.choice(
-            negative_reviews
-        )
-
-
-def clear_history():
-
-    st.session_state.history = []
-
-
 # ==========================================
-# 9. HEADER
+# REVIEW INPUT
 # ==========================================
-
-st.markdown("""
-<div class="main-title">
-    🎬 Movie Sentiment <span>Analyzer</span>
-</div>
-
-<div class="subtitle">
-    AI Powered Movie Review Classification using Word2Vec + ANN
-</div>
-""", unsafe_allow_html=True)
-
-
-# ==========================================
-# 10. SAMPLE REVIEW SECTION
-# ==========================================
-
-st.markdown("## 📝 Try Sample Reviews")
-
-st.selectbox(
-    "Choose a sample review",
-    [
-        "Select a sample review",
-        "Positive Review",
-        "Negative Review"
-    ],
-    key="sample_option"
-)
-
-st.button(
-    "📥 Load Sample Review",
-    on_click=load_sample_review
-)
-
-
-# ==========================================
-# 11. REVIEW INPUT
-# ==========================================
-
-st.markdown("## 🎥 Enter Your Movie Review")
 
 review = st.text_area(
-    "Write your movie review here",
+    "Write your movie review here:",
     key="movie_review",
-    height=120,
-    placeholder="Write your movie review here..."
+    height=180,
+    placeholder="Enter your movie review..."
 )
 
 
 # ==========================================
-# 12. ACTION BUTTONS
+# BUTTONS
 # ==========================================
 
 col1, col2, col3 = st.columns(3)
@@ -508,119 +365,137 @@ col1, col2, col3 = st.columns(3)
 with col1:
 
     predict_button = st.button(
-        "🚀 Predict Sentiment",
-        use_container_width=True
+        "🔍 Predict Sentiment"
     )
 
 with col2:
 
     st.button(
         "🎲 Random Review",
-        on_click=set_random_review,
-        use_container_width=True
+        on_click=random_review
     )
 
 with col3:
 
     st.button(
         "🗑️ Clear Review",
-        on_click=clear_review,
-        use_container_width=True
+        on_click=clear_review
     )
 
 
 # ==========================================
-# 13. PREDICTION RESULT
+# PREDICTION
 # ==========================================
 
 if predict_button:
 
     if not review.strip():
 
-        st.warning("Please enter a movie review!")
+        st.warning("Please enter a movie review.")
 
     else:
 
-        with st.spinner("Analyzing your review..."):
+        with st.spinner("Analyzing movie review..."):
 
-            sentiment, confidence, positive, negative = (
-                predict_sentiment(review)
-            )
+            try:
 
-        st.markdown("## 📊 Prediction Result")
+                sentiment, confidence, positive_probability = (
+                    predict_sentiment(review)
+                )
 
-        col1, col2 = st.columns(2)
+                negative_probability = 1 - positive_probability
 
-        with col1:
+                st.markdown("---")
 
-            st.metric(
-                "Predicted Sentiment",
-                sentiment
-            )
+                st.subheader("📊 Prediction Result")
 
-        with col2:
+                col1, col2 = st.columns(2)
 
-            st.metric(
-                "Confidence Score",
-                f"{confidence:.2f}%"
-            )
+                with col1:
 
-        # Positive and Negative Messages
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <h3>Sentiment</h3>
+                            <h2>{sentiment}</h2>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-        if sentiment == "POSITIVE":
+                with col2:
 
-            st.markdown("""
-            <div class="positive-message">
-                😊 This movie review has POSITIVE sentiment!
-            </div>
-            """, unsafe_allow_html=True)
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <h3>Confidence</h3>
+                            <h2>{confidence * 100:.2f}%</h2>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-        else:
+                if sentiment == "POSITIVE":
 
-            st.markdown("""
-            <div class="negative-message">
-                😞 This movie review has NEGATIVE sentiment!
-            </div>
-            """, unsafe_allow_html=True)
+                    st.markdown(
+                        """
+                        <div class="positive-message">
+                            😊 This movie review has POSITIVE sentiment!
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-        # Prediction Probabilities
+                else:
 
-        st.markdown("## 📈 Prediction Probabilities")
+                    st.markdown(
+                        """
+                        <div class="negative-message">
+                            😞 This movie review has NEGATIVE sentiment!
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-        st.write(
-            f"😊 Positive: {positive:.2f}%"
-        )
+                st.subheader("Sentiment Probability")
 
-        st.progress(
-            min(max(positive / 100, 0.0), 1.0)
-        )
+                st.write(
+                    f"Positive: {positive_probability * 100:.2f}%"
+                )
 
-        st.write(
-            f"😞 Negative: {negative:.2f}%"
-        )
+                st.progress(positive_probability)
 
-        st.progress(
-            min(max(negative / 100, 0.0), 1.0)
-        )
+                st.write(
+                    f"Negative: {negative_probability * 100:.2f}%"
+                )
 
-        # Save History
+                st.progress(negative_probability)
 
-        st.session_state.history.append({
+                # Save prediction history
+                st.session_state.history.append({
 
-            "Review": review,
-            "Sentiment": sentiment,
-            "Confidence": round(confidence, 2),
-            "Positive Probability": round(positive, 2),
-            "Negative Probability": round(negative, 2)
+                    "Review": review,
 
-        })
+                    "Sentiment": sentiment,
+
+                    "Confidence": round(
+                        confidence * 100, 2
+                    )
+
+                })
+
+            except Exception as e:
+
+                st.error(f"Prediction error: {e}")
 
 
 # ==========================================
-# 14. PREDICTION HISTORY
+# PREDICTION HISTORY
 # ==========================================
 
-st.markdown("## 📚 Prediction History")
+st.markdown("---")
+
+st.subheader("📚 Prediction History")
 
 if st.session_state.history:
 
@@ -630,31 +505,25 @@ if st.session_state.history:
 
     st.dataframe(
         history_df,
-        use_container_width=True,
-        hide_index=True
+        use_container_width=True
     )
 
-    csv = history_df.to_csv(
+    csv_data = history_df.to_csv(
         index=False
     ).encode("utf-8")
 
-    col1, col2 = st.columns(2)
+    st.download_button(
+        "⬇️ Download Prediction History",
+        data=csv_data,
+        file_name="movie_sentiment_history.csv",
+        mime="text/csv"
+    )
 
-    with col1:
+    if st.button("Clear History"):
 
-        st.download_button(
-            "⬇️ Download History (CSV)",
-            data=csv,
-            file_name="movie_sentiment_history.csv",
-            mime="text/csv"
-        )
+        st.session_state.history = []
 
-    with col2:
-
-        st.button(
-            "🗑️ Clear History",
-            on_click=clear_history
-        )
+        st.rerun()
 
 else:
 
@@ -662,19 +531,17 @@ else:
 
 
 # ==========================================
-# 15. FOOTER
+# FOOTER
 # ==========================================
 
-st.markdown("""
-<div class="footer">
-
-<hr>
-
-🎬 Movie Sentiment Analyzer
-
-<br><br>
-
-Built using Python | Word2Vec | ANN | NLP | Streamlit
-
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    """
+    <div class="footer">
+        🎬 Movie Sentiment Analyzer |
+        Word2Vec + Artificial Neural Network
+        <br>
+        Built using Python and Streamlit
+    </div>
+    """,
+    unsafe_allow_html=True
+)
