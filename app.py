@@ -15,7 +15,7 @@ from gensim.models import KeyedVectors
 # ==========================================
 
 st.set_page_config(
-    page_title="IMDb Sentiment Analyzer",
+    page_title="IMDb Movie Sentiment Analyzer",
     page_icon="🎬",
     layout="wide"
 )
@@ -27,6 +27,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+
 .stApp {
     background: linear-gradient(135deg, #0f172a, #1e1b4b);
     color: white;
@@ -62,13 +63,6 @@ st.markdown("""
     border: 2px solid #ef4444;
 }
 
-.metric-card {
-    background-color: #312e81;
-    padding: 20px;
-    border-radius: 12px;
-    text-align: center;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,7 +85,21 @@ st.write("")
 
 
 # ==========================================
-# 4. SAMPLE REVIEWS
+# 4. SESSION STATE
+# ==========================================
+
+if "review_text" not in st.session_state:
+    st.session_state.review_text = ""
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "prediction_result" not in st.session_state:
+    st.session_state.prediction_result = None
+
+
+# ==========================================
+# 5. SAMPLE REVIEWS
 # ==========================================
 
 sample_reviews = {
@@ -110,38 +118,43 @@ sample_reviews = {
 
 
 # ==========================================
-# 5. SESSION STATE
+# 6. CALLBACK FUNCTIONS
 # ==========================================
 
-if "review_text" not in st.session_state:
-    st.session_state.review_text = ""
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-if "prediction_result" not in st.session_state:
-    st.session_state.prediction_result = None
-
-
 def load_sample_review():
+
     selected = st.session_state.sample_choice
+
     st.session_state.review_text = sample_reviews[selected]
+
     st.session_state.prediction_result = None
 
 
 def random_review():
-    selected = random.choice(list(sample_reviews.values()))
+
+    selected = random.choice(
+        list(sample_reviews.values())
+    )
+
     st.session_state.review_text = selected
+
     st.session_state.prediction_result = None
 
 
 def clear_review():
+
     st.session_state.review_text = ""
+
     st.session_state.prediction_result = None
 
 
+def clear_history():
+
+    st.session_state.history = []
+
+
 # ==========================================
-# 6. LOAD TRAINED MODELS
+# 7. LOAD TRAINED MODELS
 # ==========================================
 
 @st.cache_resource
@@ -153,7 +166,7 @@ def load_models():
         compile=False
     )
 
-    # Load Word2Vec vectors using memory mapping
+    # Load Word2Vec using memory mapping
     word2vec_model = KeyedVectors.load(
         "word2vec.kv",
         mmap="r"
@@ -175,6 +188,10 @@ def load_models():
     )
 
 
+# ==========================================
+# 8. MODEL INITIALIZATION
+# ==========================================
+
 try:
 
     with st.spinner("Loading trained models..."):
@@ -186,22 +203,21 @@ try:
             stop_words
         ) = load_models()
 
-    st.success("Models loaded successfully!")
+    st.success("All models loaded successfully!")
 
 except Exception as e:
 
     st.error(f"Model loading error: {e}")
 
     st.info(
-        "Check whether all model files are available "
-        "in your GitHub repository."
+        "Please check model files and requirements.txt."
     )
 
     st.stop()
 
 
 # ==========================================
-# 7. TEXT PREPROCESSING
+# 9. TEXT PREPROCESSING
 # ==========================================
 
 def clean_text(text):
@@ -235,7 +251,7 @@ def tokenize_text(text):
 
 
 # ==========================================
-# 8. WORD2VEC SENTENCE EMBEDDING
+# 10. WORD2VEC SENTENCE EMBEDDING
 # ==========================================
 
 def get_sentence_embedding(tokens):
@@ -250,7 +266,10 @@ def get_sentence_embedding(tokens):
 
     if len(vectors) == 0:
 
-        return np.zeros(100, dtype=np.float32)
+        return np.zeros(
+            word2vec_model.vector_size,
+            dtype=np.float32
+        )
 
     return np.mean(
         vectors,
@@ -259,7 +278,7 @@ def get_sentence_embedding(tokens):
 
 
 # ==========================================
-# 9. SENTIMENT PREDICTION
+# 11. SENTIMENT PREDICTION
 # ==========================================
 
 def predict_sentiment(review):
@@ -267,34 +286,41 @@ def predict_sentiment(review):
     tokens = tokenize_text(review)
 
     if len(tokens) == 0:
+
         raise ValueError(
             "No valid words found after preprocessing."
         )
 
+    # Word2Vec embedding
     embedding = get_sentence_embedding(tokens)
 
     # ANN input
-    embedding = np.array(
-        [embedding],
-        dtype=np.float32
+    embedding = np.expand_dims(
+        embedding,
+        axis=0
     )
 
-    # Prediction
+    embedding = embedding.astype(np.float32)
+
+    # ANN prediction
     prediction_probability = float(
         ann_model.predict(
             embedding,
             verbose=0
-        )[0][0]
+        ).reshape(-1)[0]
     )
 
+    # Convert probability into class index
     predicted_index = (
         1 if prediction_probability >= 0.5 else 0
     )
 
+    # Label Encoder
     predicted_label = label_encoder.inverse_transform(
         [predicted_index]
     )[0]
 
+    # Probabilities
     positive_probability = prediction_probability * 100
 
     negative_probability = (
@@ -315,7 +341,7 @@ def predict_sentiment(review):
 
 
 # ==========================================
-# 10. SAMPLE REVIEW SECTION
+# 12. SAMPLE REVIEW SECTION
 # ==========================================
 
 st.subheader("📝 Try a Sample Review")
@@ -342,7 +368,7 @@ with col2:
 
 
 # ==========================================
-# 11. REVIEW INPUT
+# 13. REVIEW INPUT
 # ==========================================
 
 st.subheader("Enter Your Movie Review")
@@ -356,7 +382,7 @@ review = st.text_area(
 
 
 # ==========================================
-# 12. BUTTONS
+# 14. ACTION BUTTONS
 # ==========================================
 
 col1, col2, col3 = st.columns(3)
@@ -386,12 +412,12 @@ with col3:
 
 
 # ==========================================
-# 13. PREDICTION RESULT
+# 15. PREDICTION RESULT
 # ==========================================
 
 if predict_button:
 
-    if review.strip() == "":
+    if not review.strip():
 
         st.warning("Please enter a movie review.")
 
@@ -405,7 +431,7 @@ if predict_button:
 
                 st.session_state.prediction_result = result
 
-                # Save prediction history
+                # Save history
                 st.session_state.history.append({
                     "Review": review,
                     "Sentiment": result["sentiment"],
@@ -420,7 +446,7 @@ if predict_button:
 
 
 # ==========================================
-# 14. DISPLAY RESULT
+# 16. DISPLAY RESULT
 # ==========================================
 
 result = st.session_state.prediction_result
@@ -466,10 +492,7 @@ if result is not None:
         )
 
         st.progress(
-            min(
-                max(result["positive_probability"] / 100, 0.0),
-                1.0
-            )
+            result["positive_probability"] / 100
         )
 
     with col2:
@@ -480,15 +503,12 @@ if result is not None:
         )
 
         st.progress(
-            min(
-                max(result["negative_probability"] / 100, 0.0),
-                1.0
-            )
+            result["negative_probability"] / 100
         )
 
 
 # ==========================================
-# 15. PREDICTION HISTORY
+# 17. PREDICTION HISTORY
 # ==========================================
 
 st.divider()
@@ -517,19 +537,20 @@ if st.session_state.history:
         mime="text/csv"
     )
 
-    if st.button("Clear History"):
-
-        st.session_state.history = []
-
-        st.rerun()
+    st.button(
+        "Clear History",
+        on_click=clear_history
+    )
 
 else:
 
-    st.info("No predictions yet. Enter a review to get started.")
+    st.info(
+        "No predictions yet. Enter a review to get started."
+    )
 
 
 # ==========================================
-# 16. FOOTER
+# 18. FOOTER
 # ==========================================
 
 st.divider()
