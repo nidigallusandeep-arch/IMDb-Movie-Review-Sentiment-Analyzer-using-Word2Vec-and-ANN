@@ -1,223 +1,231 @@
 
-import streamlit as st
-import numpy as np
-import pandas as pd
+# ============================================================
+# PROJECT: IMDb MOVIE REVIEW SENTIMENT ANALYSIS
+# TECHNIQUES: WORD2VEC (SKIP-GRAM) + ANN
+# ============================================================
+
+# 1. IMPORT LIBRARIES
+
+import os
 import re
 import random
 import joblib
+import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 from gensim.models import Word2Vec
-from tensorflow.keras.models import load_model
 
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 
-# ==========================================
-# PAGE CONFIGURATION
-# ==========================================
-
-st.set_page_config(
-    page_title="Movie Sentiment Analyzer",
-    page_icon="🎬",
-    layout="wide"
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix
 )
 
-
-# ==========================================
-# CUSTOM CSS
-# ==========================================
-
-st.markdown("""
-<style>
-
-.stApp {
-    background: linear-gradient(135deg, #0f172a, #1e1b4b, #312e81);
-    color: white;
-}
-
-h1, h2, h3, p, label {
-    color: white !important;
-}
-
-.main-title {
-    text-align: center;
-    font-size: 38px;
-    font-weight: bold;
-    color: #67e8f9;
-    margin-bottom: 10px;
-}
-
-.subtitle {
-    text-align: center;
-    color: #cbd5e1;
-    font-size: 17px;
-    margin-bottom: 30px;
-}
-
-.stTextArea textarea {
-    background-color: #172554 !important;
-    color: white !important;
-    border: 1px solid #06b6d4 !important;
-    border-radius: 12px;
-}
-
-.stSelectbox div[data-baseweb="select"] {
-    background-color: #172554;
-    color: white;
-}
-
-.stButton button {
-    background: linear-gradient(90deg, #0891b2, #7c3aed);
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-weight: bold;
-    width: 100%;
-}
-
-.positive-message {
-    background: linear-gradient(90deg, #047857, #0891b2);
-    color: white !important;
-    border: 1px solid #5eead4;
-    border-radius: 12px;
-    padding: 18px;
-    font-size: 17px;
-    font-weight: bold;
-    margin: 15px 0;
-}
-
-.negative-message {
-    background: linear-gradient(90deg, #be123c, #ea580c);
-    color: white !important;
-    border: 1px solid #fda4af;
-    border-radius: 12px;
-    padding: 18px;
-    font-size: 17px;
-    font-weight: bold;
-    margin: 15px 0;
-}
-
-.metric-card {
-    background: #172554;
-    border: 1px solid #06b6d4;
-    border-radius: 12px;
-    padding: 20px;
-    text-align: center;
-}
-
-.footer {
-    text-align: center;
-    color: #94a3b8;
-    margin-top: 40px;
-}
-
-</style>
-""", unsafe_allow_html=True)
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Input, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
 
 
-# ==========================================
-# TITLE
-# ==========================================
+# ============================================================
+# 2. CONFIGURATION
+# ============================================================
 
-st.markdown(
-    '<div class="main-title">🎬 Movie Sentiment Analyzer</div>',
-    unsafe_allow_html=True
-)
+SEED = 42
+VECTOR_SIZE = 100
+WINDOW_SIZE = 5
+MIN_COUNT = 2
+EPOCHS_WORD2VEC = 10
+EPOCHS_ANN = 15
+BATCH_SIZE = 64
 
-st.markdown(
-    '<div class="subtitle">Analyze movie reviews using Word2Vec and Artificial Neural Networks</div>',
-    unsafe_allow_html=True
-)
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+print("NumPy Version:", np.__version__)
+print("TensorFlow Version:", tf.__version__)
 
 
-# ==========================================
-# LOAD MODEL AND ARTIFACTS
-# ==========================================
+# ============================================================
+# 3. LOAD DATASET
+# ============================================================
 
-@st.cache_resource
-def load_artifacts():
+DATASET_PATH = "IMDB Dataset 2.csv"
 
-    # Display versions in logs if needed
-    print("TensorFlow version:", tf.__version__)
-    print("Keras version:", tf.keras.__version__)
-
-    # Load ANN model
-    ann_model = load_model(
-        "word2vec_ann.keras",
-        compile=False
+if not os.path.exists(DATASET_PATH):
+    raise FileNotFoundError(
+        f"Dataset not found: {DATASET_PATH}"
     )
 
-    # Load Word2Vec model
-    w2v_model = Word2Vec.load("word2vec.model")
+df = pd.read_csv(DATASET_PATH)
 
-    # Load Label Encoder
-    label_encoder = joblib.load("label_encoder.pkl")
+print("\nDataset Loaded Successfully!")
+print("Dataset Shape:", df.shape)
+print("Dataset Columns:", df.columns.tolist())
 
-    # Load stopwords
-    stop_words = joblib.load("stop_words.pkl")
+df.columns = df.columns.str.strip().str.lower()
 
-    return ann_model, w2v_model, label_encoder, stop_words
+if "review" not in df.columns or "sentiment" not in df.columns:
+    raise ValueError(
+        "Dataset must contain review and sentiment columns."
+    )
+
+df = df[["review", "sentiment"]].dropna().copy()
+
+df["review"] = df["review"].astype(str)
+df["sentiment"] = (
+    df["sentiment"].astype(str).str.lower().str.strip()
+)
+
+df = df[
+    df["sentiment"].isin(["positive", "negative"])
+].reset_index(drop=True)
+
+print("\nFinal Dataset Shape:", df.shape)
+print("\nSentiment Distribution:")
+print(df["sentiment"].value_counts())
 
 
-try:
-    model, word2vec_model, label_encoder, stop_words = load_artifacts()
-
-    st.success("✅ All models and files loaded successfully!")
-
-except Exception as e:
-
-    st.error(f"Model loading error: {e}")
-
-    st.stop()
-
-
-# ==========================================
-# TEXT CLEANING
-# ==========================================
+# ============================================================
+# 4. TEXT CLEANING
+# ============================================================
 
 def clean_text(text):
 
     text = text.lower()
 
+    # Remove HTML tags
     text = re.sub(r"<.*?>", " ", text)
 
+    # Remove special characters and numbers
     text = re.sub(r"[^a-zA-Z\s]", " ", text)
 
+    # Remove extra spaces
     text = re.sub(r"\s+", " ", text).strip()
 
     return text
 
 
-# ==========================================
-# TOKENIZATION
-# ==========================================
+df["clean_review"] = df["review"].apply(clean_text)
+
+print("\nText Cleaning Completed!")
+
+
+# ============================================================
+# 5. TOKENIZATION AND STOPWORD REMOVAL
+# ============================================================
+
+# Preserve negation words for sentiment meaning
+
+negation_words = {
+    "no",
+    "not",
+    "nor",
+    "never",
+    "neither",
+    "none",
+    "cannot",
+    "without"
+}
+
+stop_words = set(ENGLISH_STOP_WORDS) - negation_words
+
 
 def tokenize_text(text):
 
-    cleaned_text = clean_text(text)
-
-    tokens = cleaned_text.split()
-
-    # Preserve negation words
-    negation_words = {
-        "no", "not", "nor", "never", "neither",
-        "none", "cannot", "without"
-    }
+    tokens = text.split()
 
     tokens = [
         word for word in tokens
-        if word not in stop_words or word in negation_words
+        if word not in stop_words
     ]
 
     return tokens
 
 
-# ==========================================
-# WORD2VEC SENTENCE EMBEDDING
-# ==========================================
+df["tokens"] = df["clean_review"].apply(tokenize_text)
 
-def get_sentence_embedding(text):
+print("\nTokenization Completed!")
+print("Sample Tokens:", df["tokens"].iloc[0][:20])
 
-    tokens = tokenize_text(text)
+
+# ============================================================
+# 6. LABEL ENCODING
+# ============================================================
+
+label_encoder = LabelEncoder()
+
+y = label_encoder.fit_transform(df["sentiment"])
+
+print("\nLabel Encoder Classes:")
+print(label_encoder.classes_)
+
+if list(label_encoder.classes_) != ["negative", "positive"]:
+    raise ValueError("Unexpected sentiment class mapping.")
+
+
+# ============================================================
+# 7. TRAIN TEST SPLIT
+# ============================================================
+
+X_tokens = df["tokens"].tolist()
+
+X_train_tokens, X_test_tokens, y_train, y_test = train_test_split(
+    X_tokens,
+    y,
+    test_size=0.20,
+    random_state=SEED,
+    stratify=y
+)
+
+print("\nTraining Records:", len(X_train_tokens))
+print("Testing Records:", len(X_test_tokens))
+
+
+# ============================================================
+# 8. WORD2VEC MODEL - SKIP GRAM
+# ============================================================
+
+print("\nTraining Word2Vec Model...")
+
+word2vec_model = Word2Vec(
+    sentences=X_train_tokens,
+    vector_size=VECTOR_SIZE,
+    window=WINDOW_SIZE,
+    min_count=MIN_COUNT,
+    workers=4,
+    sg=1,
+    epochs=EPOCHS_WORD2VEC,
+    seed=SEED
+)
+
+print("\nWord2Vec Training Completed!")
+
+print(
+    "Vocabulary Size:",
+    len(word2vec_model.wv)
+)
+
+
+# ============================================================
+# 9. SAVE WORD2VEC MODEL
+# ============================================================
+
+word2vec_model.save("word2vec.model")
+
+print("\nWord2Vec Model Saved!")
+
+
+# ============================================================
+# 10. SENTENCE EMBEDDING FUNCTION
+# ============================================================
+
+def get_sentence_embedding(tokens):
 
     vectors = []
 
@@ -229,319 +237,257 @@ def get_sentence_embedding(text):
 
     if len(vectors) == 0:
 
-        return np.zeros(100, dtype=np.float32)
+        return np.zeros(
+            VECTOR_SIZE,
+            dtype=np.float32
+        )
 
-    embedding = np.mean(vectors, axis=0)
+    sentence_vector = np.mean(
+        vectors,
+        axis=0
+    )
 
-    return embedding.astype(np.float32)
+    return sentence_vector.astype(np.float32)
 
 
-# ==========================================
-# SENTIMENT PREDICTION
-# ==========================================
+# ============================================================
+# 11. GENERATE SENTENCE EMBEDDINGS
+# ============================================================
+
+print("\nGenerating Training Embeddings...")
+
+X_train = np.array(
+    [
+        get_sentence_embedding(tokens)
+        for tokens in X_train_tokens
+    ],
+    dtype=np.float32
+)
+
+print("Generating Testing Embeddings...")
+
+X_test = np.array(
+    [
+        get_sentence_embedding(tokens)
+        for tokens in X_test_tokens
+    ],
+    dtype=np.float32
+)
+
+print("\nTraining Shape:", X_train.shape)
+print("Testing Shape:", X_test.shape)
+
+
+# ============================================================
+# 12. BUILD ARTIFICIAL NEURAL NETWORK
+# ============================================================
+
+model = Sequential([
+
+    Input(shape=(VECTOR_SIZE,)),
+
+    Dense(128, activation="relu"),
+
+    Dropout(0.3),
+
+    Dense(64, activation="relu"),
+
+    Dropout(0.2),
+
+    Dense(1, activation="sigmoid")
+
+])
+
+model.compile(
+    optimizer="adam",
+    loss="binary_crossentropy",
+    metrics=["accuracy"]
+)
+
+print("\nANN Model Summary:")
+model.summary()
+
+
+# ============================================================
+# 13. EARLY STOPPING
+# ============================================================
+
+early_stopping = EarlyStopping(
+    monitor="val_loss",
+    patience=3,
+    restore_best_weights=True
+)
+
+
+# ============================================================
+# 14. TRAIN ANN
+# ============================================================
+
+print("\nANN Model Training Started...")
+
+history = model.fit(
+    X_train,
+    y_train,
+    validation_split=0.20,
+    epochs=EPOCHS_ANN,
+    batch_size=BATCH_SIZE,
+    callbacks=[early_stopping],
+    verbose=1
+)
+
+print("\nANN Training Completed!")
+
+
+# ============================================================
+# 15. MODEL EVALUATION
+# ============================================================
+
+print("\nEvaluating ANN Model...")
+
+test_loss, test_accuracy = model.evaluate(
+    X_test,
+    y_test,
+    verbose=0
+)
+
+print("\nTest Loss:", round(test_loss, 4))
+print("Test Accuracy:", round(test_accuracy * 100, 2), "%")
+
+
+# ============================================================
+# 16. PREDICTION AND CLASSIFICATION REPORT
+# ============================================================
+
+y_probability = model.predict(
+    X_test,
+    verbose=0
+).ravel()
+
+y_pred = (y_probability >= 0.5).astype(int)
+
+print("\nAccuracy Score:")
+print(accuracy_score(y_test, y_pred))
+
+print("\nClassification Report:")
+print(
+    classification_report(
+        y_test,
+        y_pred,
+        target_names=label_encoder.classes_
+    )
+)
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+
+# ============================================================
+# 17. SAVE ANN MODEL
+# ============================================================
+
+model.save("word2vec_ann.keras")
+
+print("\nANN Model Saved Successfully!")
+
+
+# ============================================================
+# 18. SAVE LABEL ENCODER AND STOPWORDS
+# ============================================================
+
+joblib.dump(
+    label_encoder,
+    "label_encoder.pkl"
+)
+
+joblib.dump(
+    stop_words,
+    "stop_words.pkl"
+)
+
+print("\nLabel Encoder Saved!")
+print("Stopwords Saved!")
+
+
+# ============================================================
+# 19. CUSTOM REVIEW PREDICTION
+# ============================================================
 
 def predict_sentiment(review):
 
-    embedding = get_sentence_embedding(review)
+    cleaned_review = clean_text(review)
 
-    embedding = embedding.reshape(1, -1)
+    tokens = tokenize_text(cleaned_review)
 
-    prediction = model.predict(
-        embedding,
-        verbose=0
+    embedding = get_sentence_embedding(tokens)
+
+    embedding = embedding.reshape(1, VECTOR_SIZE)
+
+    probability = float(
+        model.predict(
+            embedding,
+            verbose=0
+        )[0][0]
     )
 
-    probability = float(np.asarray(prediction).reshape(-1)[0])
+    predicted_class = int(probability >= 0.5)
 
-    # ANN sigmoid predicts probability for class index 1
-    predicted_class_index = 1 if probability >= 0.5 else 0
-
-    sentiment = str(
-        label_encoder.inverse_transform(
-            [predicted_class_index]
-        )[0]
-    )
+    sentiment = label_encoder.inverse_transform(
+        [predicted_class]
+    )[0]
 
     confidence = (
-        probability if predicted_class_index == 1
+        probability
+        if predicted_class == 1
         else 1 - probability
     )
 
-    return sentiment.upper(), confidence, probability
+    return {
+        "Sentiment": sentiment.upper(),
+        "Confidence": round(confidence * 100, 2),
+        "Positive Probability": round(probability * 100, 2),
+        "Negative Probability": round(
+            (1 - probability) * 100, 2
+        )
+    }
 
 
-# ==========================================
-# SAMPLE REVIEWS
-# ==========================================
+# ============================================================
+# 20. TEST REVIEWS
+# ============================================================
 
-sample_reviews = {
+positive_review = """
+This movie is amazing. The acting is excellent.
+The story is wonderful and I really enjoyed it.
+"""
 
-    "Positive Review":
-    "This movie is absolutely fantastic. The acting is brilliant, "
-    "the story is interesting and the direction is excellent. "
-    "I really enjoyed watching this movie.",
+negative_review = """
+This movie is boring and terrible.
+The acting is bad and I did not enjoy watching it.
+"""
 
-    "Negative Review":
-    "This movie is very boring and disappointing. "
-    "The story is weak, the acting is terrible and "
-    "I did not enjoy watching it at all."
-}
+print("\nPositive Review Prediction:")
+print(predict_sentiment(positive_review))
 
+print("\nNegative Review Prediction:")
+print(predict_sentiment(negative_review))
 
-# ==========================================
-# SESSION STATE
-# ==========================================
 
-if "movie_review" not in st.session_state:
-    st.session_state.movie_review = ""
+# ============================================================
+# 21. FINAL OUTPUT
+# ============================================================
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+print("\n==========================================")
+print("WORD2VEC + ANN TRAINING COMPLETED")
+print("==========================================")
 
+print("""
+Generated Model Files:
 
-def load_sample():
+1. word2vec.model
+2. word2vec_ann.keras
+3. label_encoder.pkl
+4. stop_words.pkl
 
-    selected = st.session_state.sample_option
+Project Training Completed Successfully!
+""")
 
-    st.session_state.movie_review = sample_reviews[selected]
-
-
-def random_review():
-
-    st.session_state.movie_review = random.choice(
-        list(sample_reviews.values())
-    )
-
-
-def clear_review():
-
-    st.session_state.movie_review = ""
-
-
-# ==========================================
-# SAMPLE REVIEW SELECTION
-# ==========================================
-
-st.subheader("📝 Enter Movie Review")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-
-    st.selectbox(
-        "Choose Sample Review",
-        list(sample_reviews.keys()),
-        key="sample_option"
-    )
-
-with col2:
-
-    st.write("")
-
-    st.button(
-        "Load Sample Review",
-        on_click=load_sample
-    )
-
-
-# ==========================================
-# REVIEW INPUT
-# ==========================================
-
-review = st.text_area(
-    "Write your movie review here:",
-    key="movie_review",
-    height=180,
-    placeholder="Enter your movie review..."
-)
-
-
-# ==========================================
-# BUTTONS
-# ==========================================
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-
-    predict_button = st.button(
-        "🔍 Predict Sentiment"
-    )
-
-with col2:
-
-    st.button(
-        "🎲 Random Review",
-        on_click=random_review
-    )
-
-with col3:
-
-    st.button(
-        "🗑️ Clear Review",
-        on_click=clear_review
-    )
-
-
-# ==========================================
-# PREDICTION
-# ==========================================
-
-if predict_button:
-
-    if not review.strip():
-
-        st.warning("Please enter a movie review.")
-
-    else:
-
-        with st.spinner("Analyzing movie review..."):
-
-            try:
-
-                sentiment, confidence, positive_probability = (
-                    predict_sentiment(review)
-                )
-
-                negative_probability = 1 - positive_probability
-
-                st.markdown("---")
-
-                st.subheader("📊 Prediction Result")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <h3>Sentiment</h3>
-                            <h2>{sentiment}</h2>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                with col2:
-
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <h3>Confidence</h3>
-                            <h2>{confidence * 100:.2f}%</h2>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                if sentiment == "POSITIVE":
-
-                    st.markdown(
-                        """
-                        <div class="positive-message">
-                            😊 This movie review has POSITIVE sentiment!
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                else:
-
-                    st.markdown(
-                        """
-                        <div class="negative-message">
-                            😞 This movie review has NEGATIVE sentiment!
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                st.subheader("Sentiment Probability")
-
-                st.write(
-                    f"Positive: {positive_probability * 100:.2f}%"
-                )
-
-                st.progress(positive_probability)
-
-                st.write(
-                    f"Negative: {negative_probability * 100:.2f}%"
-                )
-
-                st.progress(negative_probability)
-
-                # Save prediction history
-                st.session_state.history.append({
-
-                    "Review": review,
-
-                    "Sentiment": sentiment,
-
-                    "Confidence": round(
-                        confidence * 100, 2
-                    )
-
-                })
-
-            except Exception as e:
-
-                st.error(f"Prediction error: {e}")
-
-
-# ==========================================
-# PREDICTION HISTORY
-# ==========================================
-
-st.markdown("---")
-
-st.subheader("📚 Prediction History")
-
-if st.session_state.history:
-
-    history_df = pd.DataFrame(
-        st.session_state.history
-    )
-
-    st.dataframe(
-        history_df,
-        use_container_width=True
-    )
-
-    csv_data = history_df.to_csv(
-        index=False
-    ).encode("utf-8")
-
-    st.download_button(
-        "⬇️ Download Prediction History",
-        data=csv_data,
-        file_name="movie_sentiment_history.csv",
-        mime="text/csv"
-    )
-
-    if st.button("Clear History"):
-
-        st.session_state.history = []
-
-        st.rerun()
-
-else:
-
-    st.info("No prediction history available yet.")
-
-
-# ==========================================
-# FOOTER
-# ==========================================
-
-st.markdown(
-    """
-    <div class="footer">
-        🎬 Movie Sentiment Analyzer |
-        Word2Vec + Artificial Neural Network
-        <br>
-        Built using Python and Streamlit
-    </div>
-    """,
-    unsafe_allow_html=True
-)
